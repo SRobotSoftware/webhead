@@ -43,9 +43,7 @@ const searchSite = async (url, query, history = []) => {
 
 
     // Find query term
-    // `/\b${query}\b/` SHOULD be working according to every regex tester I can find, but it isn't working here.
-    // So I'm settling for some bad results instead of no results
-    const searchRegex = new RegExp(`${query}`, 'gi')
+    const searchRegex = new RegExp(`\\b${query}\\b`, 'gi')
     for (const match of text.matchAll(searchRegex)) {
         const out = match.input
             .slice(Math.max(match.index - context, 0), Math.min(match.index + match[0].length + context, match.input.length))
