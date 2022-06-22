@@ -1,5 +1,4 @@
 const args = require('minimist')(process.argv.slice(2))
-
 const axios = require('axios').default
 
 const site = args['site'] || args._[0]
@@ -17,6 +16,7 @@ const searchSite = async (site, query, history = []) => {
         response = await axios.get(site)
     } catch (err) {
         // console.error(err)
+        // This needed to be handled more gracefully
         return { links: [], matches: [], history: [] }
     }
 
@@ -34,11 +34,21 @@ const searchSite = async (site, query, history = []) => {
     // Find links
     // I'm using a regex I found here: https://stackoverflow.com/questions/3809401/what-is-a-good-regular-expression-to-match-a-url
     const linkRegex = new RegExp('https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)', 'ig')
-    const links = [...data.matchAll(linkRegex)].map(x => x[0]).filter(x => !x.endsWith('.pdf'))
+    const links = [...data.matchAll(linkRegex)]
+        .map(x => x[0])
+    /*
+    I'm sure there's a better way to do this but I was seeing a lot of PDFs in the results I was testing and wanted to
+    at least get rid of those. With more time I'd modify the request options to ensure I'm only getting text back.
+     */
+        .filter(x => !x.endsWith('.pdf'))
 
     // Find matches
-    // This method isn't very good, I got wrapped up on some of the earlier regex and didn't have time to fix this
-    // With more time I would
+    /*
+    This method isn't very good, I got wrapped up on some of the earlier regex and didn't have time to fix this.
+    With more time I would find a better way to grab just the raw text from the HTML, I didn't think to look for an
+    HTML parser library until just now but I'm sure one exists and could handle that cleanly. With just the raw inner
+    text you could do a really simple regex to grab the keyword and a few words before/after.
+     */
     const matches = data
         .split(/<.*?\/?>/) // Break text out by HTML tags
         .filter(x => x.includes(query)) // search for query text
@@ -54,7 +64,7 @@ const main = async (site, query) => {
     const matches = []
     const links = new Set()
 
-    // This could be turned into a recursive function pretty easily, or a do/while
+    // This could be turned into a recursive function pretty easily, or a do/while, I ran out of time
     const data = await searchSite(site, query)
     matches.push(...data.matches.map(x => `${site} => '${x}'`))
     data.links.forEach(x => links.add(x))
