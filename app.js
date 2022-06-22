@@ -1,61 +1,59 @@
 const args = require('minimist')(process.argv.slice(2))
 const axios = require('axios').default
+const JSSoup = require('jssoup').default
 
 const site = args['site'] || args._[0]
 const query = args['query'] || args._[1]
+const context = args['context'] || args._[2] || 10
 
-const searchSite = async (site, query, history = []) => {
-    history.push(site)
+const searchSite = async (url, query, history = []) => {
+    history.push(url)
 
-    console.log(`Searching ${site} for ${query}`)
+    const matches = []
+    const links = new Set()
+    const domain = (new URL(url)).hostname
+
+    // console.log(`Searching ${url} for ${query}`)
 
     let response
 
     // Get data
     try {
-        response = await axios.get(site)
+        response = await axios.get(url)
     } catch (err) {
         // console.error(err)
         // This needed to be handled more gracefully
-        return { links: [], matches: [], history: [] }
+        return { matches, links, domain }
     }
 
     let data = response.data
 
-    if (typeof data !== "string") return { links: [], matches: [], history: [] }
+    if (typeof data !== "string" || response.status !== 200) return { matches, links, domain }
+
 
     // Process page
-    data = data.replace(/\s{2,}/g, '') // remove excess whitespace
-
-    // Remove JS
-    const stripJS = new RegExp('<script.*?\/(?:script)?>', 'gis')
-    data = data.replace(stripJS, '') // strip out anything in a script tag
+    const soup = new JSSoup(data)
+    const text = soup.text
 
     // Find links
-    // I'm using a regex I found here: https://stackoverflow.com/questions/3809401/what-is-a-good-regular-expression-to-match-a-url
     const linkRegex = new RegExp('https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)', 'ig')
-    const links = [...data.matchAll(linkRegex)]
-        .map(x => x[0])
-    /*
-    I'm sure there's a better way to do this but I was seeing a lot of PDFs in the results I was testing and wanted to
-    at least get rid of those. With more time I'd modify the request options to ensure I'm only getting text back.
-     */
-        .filter(x => !x.endsWith('.pdf'))
+    const test = soup.findAll('a').map(x => x.attrs.href)
+    test.filter(x => linkRegex.test(x) && x.includes(domain)).forEach(x => links.add(x))
+    test.filter(x => !linkRegex.test(x)).map(x => url + '/' + x).forEach(x => links.add(x))
 
-    // Find matches
-    /*
-    This method isn't very good, I got wrapped up on some of the earlier regex and didn't have time to fix this.
-    With more time I would find a better way to grab just the raw text from the HTML, I didn't think to look for an
-    HTML parser library until just now but I'm sure one exists and could handle that cleanly. With just the raw inner
-    text you could do a really simple regex to grab the keyword and a few words before/after.
-     */
-    const matches = data
-        .split(/<.*?\/?>/) // Break text out by HTML tags
-        .filter(x => x.includes(query)) // search for query text
 
-    links.filter(x => !history.find(y => x === y))
+    // Find query term
+    // `/\b${query}\b/` SHOULD be working according to every regex tester I can find, but it isn't working here.
+    // So I'm settling for some bad results instead of no results
+    const searchRegex = new RegExp(`${query}`, 'gi')
+    for (const match of text.matchAll(searchRegex)) {
+        const out = match.input
+            .slice(Math.max(match.index - context, 0), Math.min(match.index + match[0].length + context, match.input.length))
+            .replace(/\s{2,}/, ' ')
+        matches.push(out)
+    }
 
-    return { links, matches, history }
+    return { matches, links: [...links], domain }
 }
 
 const main = async (site, query) => {
@@ -63,6 +61,7 @@ const main = async (site, query) => {
 
     const matches = []
     const links = new Set()
+    let pages = 1
 
     // This could be turned into a recursive function pretty easily, or a do/while, I ran out of time
     const data = await searchSite(site, query)
@@ -73,11 +72,12 @@ const main = async (site, query) => {
         const moreData = await searchSite(link, query, [site])
         matches.push(...moreData.matches.map(x => `${link} => '${x}'`))
         moreData.links.forEach(x => links.add(x))
+        pages++
     })
 
     await Promise.all(promises)
     console.log(matches)
-    console.log(`Crawled ${links.size} pages. Found ${matches.length} matches`)
+    console.log(`Crawled ${links.size} links across ${pages} pages. Found ${matches.length} matches`)
 }
 
 main(site, query)
